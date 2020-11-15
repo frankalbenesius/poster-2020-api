@@ -1,0 +1,16 @@
+{
+  "name": "poster-2020-api",
+  "version": "1.0.0",
+  "description": "an api for poster 2020",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js"
+  },
+  "author": "Frank Albenesius",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "nodemon": "^2.0.6"
+  }
+}
