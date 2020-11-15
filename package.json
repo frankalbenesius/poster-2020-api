@@ -10,10 +10,12 @@
   "author": "Frank Albenesius",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.17.1",
-    "nodemon": "^2.0.6"
+    "express": "^4.17.1"
   },
   "engines": {
     "node": "15.x"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.6"
   }
 }
