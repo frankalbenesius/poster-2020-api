@@ -1,9 +1,10 @@
-const express = require("express");
-const app = express();
-const PORT = process.env.PORT || 5000;
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
 
-const upload = require("./handlers/upload");
+import upload from "./handlers/upload.js";
+
+const PORT = process.env.PORT || 5000;
+const app = express();
 
 app.use(cors());
 

@@ -4,13 +4,15 @@
   "description": "an api for poster 2020",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon index.js",
-    "start": "node index.js"
+    "dev": "nodemon -r dotenv/config index.js",
+    "start": "node -r dotenv/config index.js"
   },
+  "type": "module",
   "author": "Frank Albenesius",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^8.2.0",
     "express": "^4.17.1",
     "firebase-admin": "^9.4.1",
     "multiparty": "^4.2.2",
