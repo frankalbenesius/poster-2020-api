@@ -14,28 +14,10 @@ const admin = adminSDK.initializeApp({
 const db = admin.firestore();
 const bucket = admin.storage().bucket();
 
-const snapshot = await db.collection("posters").get();
-snapshot.forEach((doc) => {
-  console.log(doc.id, "=>", doc.data());
-});
-
-bucket.getFiles((err, files) => {
-  if (!err) {
-    files.forEach((file) => {
-      console.log(file.name);
-    });
-  }
-});
-
-// const BUCKET_NAME = "holiday-poster-2019.appspot.com";
-// function getPublicURL(bucketName, fileName) {
-//   return `https://storage.googleapis.com/${bucketName}/${fileName}`;
-// }
-
 const NORMALIZED_UPLOAD_PATH = "/tmp/converted-image.png";
 const POSTER_BEFORE_PATH = "/tmp/poster_before.png";
 const POSTER_AFTER_PATH = "/tmp/poster_after.png";
-const POSTER_BUCKET_PATH = "poster.png";
+
 const POSTER_STARTER_BUCKET_PATH = "poster_starter.png";
 const SQUARE_SIZE = 650;
 const NUM_SQUARES = 72;
@@ -43,37 +25,68 @@ const ROOT_TOP = 1250;
 const ROOT_LEFT = 100;
 
 export default async (req, res) => {
-  // check if submissions are open...
   try {
+    await confirmSubmissionsAreStillOpen();
+
     const { invitationId, image } = await readMultipartBody(req);
     const invitation = await validateAndGetInvitation(invitationId);
 
-    await storeNormalizedImageLocally(image.path);
-    const newFile = await addNormalizedInvitationToStorage(invitation.id);
+    await storeNormalizedSubmissionLocally(image.path);
+    await addNormalizedInvitationToStorage(invitation.id);
 
-    await storeBeforePosterLocally();
-    await addNormalizedImageToAfterPoster({ square: invitation.square });
-    await updatePosterInStorage();
+    await fetchAndStoreCurrentPosterLocally();
+    await addNormalizedImageToLocalPoster({ square: invitation.square });
+    await uploadUpdatedPoster();
 
-    res.sendFile(POSTER_AFTER_PATH);
+    res.send("great job!");
   } catch (e) {
     res.status(400).send(e.message || e);
   }
 };
 
-async function updatePosterInStorage() {
-  const [poster] = await bucket.upload(POSTER_AFTER_PATH, {
-    destination: POSTER_BUCKET_PATH,
-  });
-  await poster.makePublic();
+async function confirmSubmissionsAreStillOpen() {
+  const configDoc = await db.collection("meta").doc("config").get();
+  if (!configDoc.exists) {
+    throw new Error("could not find config doc");
+  }
+  const config = configDoc.data();
+  const { submissionsAreOpen } = config;
+  if (!submissionsAreOpen) {
+    throw new Error("submissions are closed");
+  } else {
+    return;
+  }
 }
 
-async function storeBeforePosterLocally() {
-  const poster = bucket.file(POSTER_BUCKET_PATH);
-  const [exists] = await poster.exists();
+async function uploadUpdatedPoster() {
+  const newPosterRef = db.collection("posters").doc();
+  const destination = `posters/${newPosterRef.id}.png`;
+  const [poster] = await bucket.upload(POSTER_AFTER_PATH, {
+    destination,
+  });
+  await poster.makePublic();
+  await newPosterRef.set({
+    destination,
+    createdOn: adminSDK.firestore.Timestamp.now(),
+  });
+  await db.collection("meta").doc("config").update({
+    latestPosterStoragePath: destination,
+  });
+}
+
+async function fetchAndStoreCurrentPosterLocally() {
+  const configDoc = await db.collection("meta").doc("config").get();
+  if (!configDoc.exists) {
+    throw new Error("could not find config doc");
+  }
+  const {
+    latestPosterStoragePath = "a default value that does not exist",
+  } = configDoc.data();
+  const lastestPoster = bucket.file(latestPosterStoragePath);
+  const [exists] = await lastestPoster.exists();
 
   if (exists) {
-    await poster.download({ destination: POSTER_BEFORE_PATH });
+    await lastestPoster.download({ destination: POSTER_BEFORE_PATH });
   } else {
     await bucket
       .file(POSTER_STARTER_BUCKET_PATH)
@@ -81,7 +94,7 @@ async function storeBeforePosterLocally() {
   }
 }
 
-async function addNormalizedImageToAfterPoster({ square }) {
+async function addNormalizedImageToLocalPoster({ square }) {
   const column = square % 8;
   const row = Math.floor(square / 8);
   const top = ROOT_TOP + row * SQUARE_SIZE;
@@ -94,23 +107,31 @@ async function addNormalizedImageToAfterPoster({ square }) {
 
 function addNormalizedInvitationToStorage(invitationId) {
   return new Promise((resolve, reject) => {
-    bucket.upload(
-      NORMALIZED_UPLOAD_PATH,
-      { destination: `uploads/${invitationId}.png` },
-      (err, newFile) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(newFile);
-        }
+    const newSubmissionRef = db.collection("submissions").doc();
+    const destination = `uploads/${newSubmissionRef.id}.png`;
+    bucket.upload(NORMALIZED_UPLOAD_PATH, { destination }, (err, newFile) => {
+      if (err) {
+        reject(err);
+      } else {
+        newSubmissionRef
+          .set({
+            destination,
+            createdOn: adminSDK.firestore.Timestamp.now(),
+            invitationId,
+          })
+          .then(() => {
+            resolve(newFile);
+          })
+          .catch(reject);
       }
-    );
+    });
   });
 }
 
 function generateRandomSquare() {
   return Math.floor(Math.random() * NUM_SQUARES);
 }
+
 async function validateAndGetInvitation(invitationId) {
   const invitationDoc = await db
     .collection("invitations")
@@ -121,7 +142,7 @@ async function validateAndGetInvitation(invitationId) {
   } else {
     const invitation = invitationDoc.data();
 
-    if (invitation.square === null) {
+    if (invitation.square === null || invitation.square === undefined) {
       const invitationsRef = db.collection("invitations");
       const snapshot = await invitationsRef.where("square", "!=", null).get();
       const claimedSquares = snapshot.docs.map((doc) => doc.data().square);
@@ -147,7 +168,7 @@ async function validateAndGetInvitation(invitationId) {
   }
 }
 
-function storeNormalizedImageLocally(imagePath) {
+function storeNormalizedSubmissionLocally(imagePath) {
   return sharp(imagePath)
     .rotate()
     .resize(SQUARE_SIZE, SQUARE_SIZE)
@@ -177,45 +198,3 @@ function readMultipartBody(req) {
     });
   });
 }
-
-// const squaresRef = db.collection("squares");
-// squaresRef
-//   .where("invitationId", "==", invitationId)
-//   .limit(1)
-//   .get()
-//   .then((squaresSnapshot) => {
-//     if (squaresSnapshot.empty) {
-//       return res.status(401).send("Not a valid invitationId, yo.");
-//     }
-
-//     const bucket = storage.bucket(BUCKET_NAME);
-//     const filename = image.path.replace("/tmp/", "");
-//     const uploadOptions = { destination: filename };
-
-// bucket.upload(NORMALIZED_UPLOAD_PATH, uploadOptions, (err, newFile) => {
-//   if (err) {
-//     res.status(400).send(JSON.stringify(err));
-//   }
-//   newFile.makePublic().then(() => {
-//     const publicUrl = getPublicURL(BUCKET_NAME, filename);
-//     squaresSnapshot.forEach((squareDoc) => {
-//       const batch = db.batch();
-//       const squareData = squareDoc.data();
-//       batch.update(squaresRef.doc(squareDoc.id), {
-//         image: publicUrl,
-//       });
-//       batch.set(db.collection("uploads").doc(), {
-//         location: squareData.location,
-//         image: publicUrl,
-//         timestamp: admin.firestore.FieldValue.serverTimestamp(),
-//       });
-//       batch.commit().then(() => {
-//         return res.status(201).send({
-//           location: squareData.location,
-//           participant: squareData.participant,
-//           image: publicUrl,
-//         });
-//       });
-//     });
-//   });
-// });
