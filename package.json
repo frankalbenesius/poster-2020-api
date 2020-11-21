@@ -7,19 +7,20 @@
     "dev": "nodemon -r dotenv/config index.js",
     "start": "node -r dotenv/config index.js"
   },
-  "type": "module",
   "author": "Frank Albenesius",
   "license": "ISC",
   "dependencies": {
+    "canvas": "^2.6.1",
     "cors": "^2.8.5",
     "dotenv": "^8.2.0",
     "express": "^4.17.1",
     "firebase-admin": "^9.4.1",
     "multiparty": "^4.2.2",
+    "request": "^2.88.2",
     "sharp": "^0.26.2"
   },
   "engines": {
-    "node": "15.x"
+    "node": "12.16.1"
   },
   "devDependencies": {
     "nodemon": "^2.0.6"

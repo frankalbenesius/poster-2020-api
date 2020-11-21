@@ -1,6 +1,8 @@
-import multiparty from "multiparty";
-import sharp from "sharp";
-import adminSDK from "firebase-admin";
+const multiparty = require("multiparty");
+const sharp = require("sharp");
+const adminSDK = require("firebase-admin");
+const { createCanvas, loadImage, registerFont } = require("canvas");
+const fs = require("fs");
 
 const admin = adminSDK.initializeApp({
   credential: adminSDK.credential.cert(
@@ -15,6 +17,7 @@ const db = admin.firestore();
 const bucket = admin.storage().bucket();
 
 const NORMALIZED_UPLOAD_PATH = "/tmp/converted-image.png";
+const TEXT_ADDED_PATH = "/tmp/text-added-image.png";
 const POSTER_BEFORE_PATH = "/tmp/poster_before.png";
 const POSTER_AFTER_PATH = "/tmp/poster_after.png";
 
@@ -24,7 +27,7 @@ const NUM_SQUARES = 72;
 const ROOT_TOP = 1250;
 const ROOT_LEFT = 100;
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
   try {
     await confirmSubmissionsAreStillOpen();
 
@@ -32,7 +35,8 @@ export default async (req, res) => {
     const invitation = await validateAndGetInvitation(invitationId);
 
     await storeNormalizedSubmissionLocally(image.path);
-    await addNormalizedInvitationToStorage(invitation.id);
+    await addTextToNormalizedSubmission(invitation.name);
+    await addManipulatedImageToStorage(invitation.id);
 
     await fetchAndStoreCurrentPosterLocally();
     await addNormalizedImageToLocalPoster({ square: invitation.square });
@@ -43,6 +47,43 @@ export default async (req, res) => {
     res.status(400).send(e.message || e);
   }
 };
+
+async function addTextToNormalizedSubmission(text) {
+  registerFont("fonts/FiraMono-Regular.ttf", { family: "Fira Mono " });
+
+  const size = SQUARE_SIZE;
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+
+  const image = await loadImage(NORMALIZED_UPLOAD_PATH);
+  ctx.drawImage(image, 0, 0, size, size);
+
+  const textSize = 40;
+  ctx.font = `${textSize}px "Fira Mono"`;
+  const textWidth = ctx.measureText(text).width;
+  const textPadding = 10;
+  const margin = 0;
+
+  const rectLeft = margin;
+  const rectWidth = textWidth + textPadding * 2;
+  const rectHeight = textSize + textPadding * 2;
+  const rectTop = size - margin - rectHeight;
+  ctx.fillStyle = "black";
+  ctx.fillRect(rectLeft, rectTop, rectWidth, rectHeight);
+
+  const textBottom = size - margin - textPadding;
+  const textLeft = margin + textPadding;
+  ctx.fillStyle = "white";
+  ctx.fillText(text, textLeft, textBottom);
+
+  const out = fs.createWriteStream(TEXT_ADDED_PATH);
+  const stream = canvas.createPNGStream();
+  stream.pipe(out);
+
+  return new Promise((resolve) => {
+    out.on("finish", () => resolve());
+  });
+}
 
 async function confirmSubmissionsAreStillOpen() {
   const configDoc = await db.collection("meta").doc("config").get();
@@ -101,15 +142,15 @@ async function addNormalizedImageToLocalPoster({ square }) {
   const left = ROOT_LEFT + column * SQUARE_SIZE;
 
   await sharp(POSTER_BEFORE_PATH)
-    .composite([{ input: NORMALIZED_UPLOAD_PATH, top, left }])
+    .composite([{ input: TEXT_ADDED_PATH, top, left }])
     .toFile(POSTER_AFTER_PATH);
 }
 
-function addNormalizedInvitationToStorage(invitationId) {
+function addManipulatedImageToStorage(invitationId) {
   return new Promise((resolve, reject) => {
     const newSubmissionRef = db.collection("submissions").doc();
     const destination = `uploads/${newSubmissionRef.id}.png`;
-    bucket.upload(NORMALIZED_UPLOAD_PATH, { destination }, (err, newFile) => {
+    bucket.upload(TEXT_ADDED_PATH, { destination }, (err, newFile) => {
       if (err) {
         reject(err);
       } else {
