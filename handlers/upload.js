@@ -32,17 +32,17 @@ module.exports = async (req, res) => {
     await confirmSubmissionsAreStillOpen();
 
     const { invitationId, image } = await readMultipartBody(req);
-    const invitation = await validateAndGetInvitation(invitationId);
+    const invitation = await validateAndUpdateInvitation(invitationId);
 
     await storeNormalizedSubmissionLocally(image.path);
     await addTextToNormalizedSubmission(invitation.name);
     await addManipulatedImageToStorage(invitation.id);
 
+    res.send("great job!");
+
     await fetchAndStoreCurrentPosterLocally();
     await addNormalizedImageToLocalPoster({ square: invitation.square });
     await uploadUpdatedPoster();
-
-    res.send("great job!");
   } catch (e) {
     res.status(400).send(e.message || e);
   }
@@ -173,7 +173,7 @@ function generateRandomSquare() {
   return Math.floor(Math.random() * NUM_SQUARES);
 }
 
-async function validateAndGetInvitation(invitationId) {
+async function validateAndUpdateInvitation(invitationId) {
   const invitationDoc = await db
     .collection("invitations")
     .doc(invitationId)
