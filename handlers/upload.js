@@ -20,12 +20,14 @@ const NORMALIZED_UPLOAD_PATH = "/tmp/converted-image.png";
 const TEXT_ADDED_PATH = "/tmp/text-added-image.png";
 const POSTER_BEFORE_PATH = "/tmp/poster_before.png";
 const POSTER_AFTER_PATH = "/tmp/poster_after.png";
+const POSTER_PREVIEW_PATH = "/tmp/poster_preview.png";
 
 const POSTER_STARTER_BUCKET_PATH = "poster_starter.png";
 const SQUARE_SIZE = 650;
 const NUM_SQUARES = 72;
 const ROOT_TOP = 1250;
 const ROOT_LEFT = 100;
+const POSTER_PREVIEW_WIDTH = 18 * 72; // 18 inches times 72ppi
 
 module.exports = async (req, res) => {
   try {
@@ -41,8 +43,8 @@ module.exports = async (req, res) => {
     res.send("great job!");
 
     await fetchAndStoreCurrentPosterLocally();
-    await addNormalizedImageToLocalPoster({ square: invitation.square });
-    await uploadUpdatedPoster();
+    await addNormalizedImageToLocalPosters({ square: invitation.square });
+    await uploadUpdatedPosters();
   } catch (e) {
     res.status(400).send(e.message || e);
   }
@@ -99,18 +101,33 @@ async function confirmSubmissionsAreStillOpen() {
   }
 }
 
-async function uploadUpdatedPoster() {
+async function uploadUpdatedPosters() {
+  // a new poster document
   const newPosterRef = db.collection("posters").doc();
+
+  // upload full size poster
   const destination = `posters/${newPosterRef.id}.png`;
   const [poster] = await bucket.upload(POSTER_AFTER_PATH, {
     destination,
   });
   await poster.makePublic();
+
+  // upload preview size poster
+  const previewDestination = `poster_previews/${newPosterRef.id}.png`;
+  const [previewPoster] = await bucket.upload(POSTER_PREVIEW_PATH, {
+    destination: previewDestination,
+  });
+  await previewPoster.makePublic();
+
+  // set values for new poster document
   await newPosterRef.set({
     destination,
+    previewDestination,
     createdOn: adminSDK.firestore.Timestamp.now(),
   });
+
   await db.collection("meta").doc("config").update({
+    latestPosterPreviewStoragePath: previewDestination,
     latestPosterStoragePath: destination,
   });
 }
@@ -135,7 +152,7 @@ async function fetchAndStoreCurrentPosterLocally() {
   }
 }
 
-async function addNormalizedImageToLocalPoster({ square }) {
+async function addNormalizedImageToLocalPosters({ square }) {
   const column = square % 8;
   const row = Math.floor(square / 8);
   const top = ROOT_TOP + row * SQUARE_SIZE;
@@ -144,6 +161,10 @@ async function addNormalizedImageToLocalPoster({ square }) {
   await sharp(POSTER_BEFORE_PATH)
     .composite([{ input: TEXT_ADDED_PATH, top, left }])
     .toFile(POSTER_AFTER_PATH);
+
+  await sharp(POSTER_AFTER_PATH)
+    .resize(POSTER_PREVIEW_WIDTH)
+    .toFile(POSTER_PREVIEW_PATH);
 }
 
 function addManipulatedImageToStorage(invitationId) {
